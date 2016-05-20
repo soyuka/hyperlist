@@ -28,6 +28,20 @@ var _lastRepaint = Symbol('lastRepaint');
 var _getRow = Symbol('getRow');
 var _getScrollPosition = Symbol('getScrollPosition');
 var _maxElementHeight = Symbol('maxElementHeight');
+var _itemHeights = Symbol('itemHeights');
+var _itemPositions = Symbol('itemPositions');
+var _calculatePositions = Symbol('calculatePositions');
+var _applyPositions = Symbol('applyPositions');
+
+// Check for valid number.
+var isNumber = function isNumber(input) {
+  return Number(input) === Number(input);
+};
+
+/**
+ * Creates a HyperList instance that virtually scrolls very large amounts of
+ * data effortlessly.
+ */
 
 var HyperList = function () {
   _createClass(HyperList, null, [{
@@ -139,9 +153,23 @@ var HyperList = function () {
         throw new Error('Missing required `generate` function');
       }
 
-      if (Number(config.total) !== Number(config.total)) {
+      if (!isNumber(config.total)) {
         throw new Error('Invalid required `total` value, expected number');
       }
+
+      if (!Array.isArray(config.itemHeight) && !isNumber(config.itemHeight)) {
+        throw new Error('\n        Invalid required `itemHeight` value, expected number or array\n      '.trim());
+      } else if (isNumber(config.itemHeight)) {
+        this[_itemHeights] = Array(config.total).fill(config.itemHeight);
+      } else {
+        this[_itemHeights] = config.itemHeight;
+      }
+
+      // Reuse the item positions if refreshed, otherwise set to empty array.
+      this[_itemPositions] = this[_itemPositions] || [];
+
+      // Each index in the array should represent the position in the DOM.
+      this[_calculatePositions](0);
 
       // Width and height should be coerced to string representations. Either in
       // `%` or `px`.
@@ -150,10 +178,12 @@ var HyperList = function () {
       }).forEach(function (prop) {
         var value = config[prop];
 
-        if (typeof value !== 'string' && typeof value !== 'number') {
+        if (!value) {
+          return;
+        } else if (typeof value !== 'string' && typeof value !== 'number') {
           var msg = 'Invalid optional `' + prop + '`, expected string or number';
           throw new Error(msg);
-        } else if (typeof value === 'number' || value.slice(-1) !== '%') {
+        } else if (isNumber(value) || value.slice(-1) !== '%') {
           config[prop] = value + 'px';
         }
       });
@@ -195,13 +225,23 @@ var HyperList = function () {
       }
     }
   }, {
+    key: _calculatePositions,
+    value: function value(startFrom) {
+      var itemHeights = this[_itemHeights];
+      var itemPos = this[_itemPositions];
+
+      itemHeights.forEach(function (itemHeight, i) {
+        var prevHeight = isNumber(itemPos[i - 1]) ? itemPos[i - 1] : -itemHeight;
+        itemPos[i] = prevHeight + itemHeight;
+      });
+    }
+  }, {
     key: _getRow,
     value: function value(i) {
       var config = this[_config];
       var reverse = config.reverse;
       var total = config.total;
-      var item = config.generate(i);
-      var itemHeight = config.itemHeight;
+      var item = config.generate.apply(null, arguments);
 
       if (!item || item.nodeType !== 1) {
         throw new Error('Generator did not return a DOM Node for index: ' + i);
@@ -209,11 +249,6 @@ var HyperList = function () {
 
       var oldClass = item.getAttribute('class') || '';
       item.setAttribute('class', oldClass + ' ' + (config.rowClassName || 'vrow'));
-
-      var offsetTop = i * itemHeight;
-      var top = reverse ? (total - 1) * itemHeight - offsetTop : offsetTop;
-
-      item.setAttribute('style', '\n      ' + (item.style.cssText || '') + '\n      position: absolute;\n      top: ' + top + 'px\n    ');
 
       return item;
     }
@@ -231,6 +266,8 @@ var HyperList = function () {
   }, {
     key: _renderChunk,
     value: function value() {
+      var _this2 = this;
+
       var config = this[_config];
       var element = this[_element];
       var scrollTop = this[_getScrollPosition]();
@@ -242,6 +279,11 @@ var HyperList = function () {
       var from = estFrom > total ? total : estFrom < 0 ? 0 : estFrom;
       var estTo = from + this[_cachedItemsLen];
       var to = estTo > total ? total : estTo < 0 ? 0 : estTo;
+
+      var fastCache = [];
+
+      var state = { semaphore: null, isRendering: false };
+      var arity = config.generate.length;
 
       // Append all the new rows in a document fragment that we will later append
       // to the parent node
@@ -259,10 +301,41 @@ var HyperList = function () {
       // Keep the scroller in the list of children.
       fragment[config.useFragment ? 'appendChild' : 'push'](this[_scroller]);
 
-      for (var i = from; i < to; i++) {
-        var row = getRow(config.reverse ? config.total - 1 - i : i);
+      state.isRendering = true;
+
+      var _loop = function _loop(i) {
+        var updateIndex = function updateIndex(newHeight) {
+          state.semaphore--;
+
+          if (!isNumber(newHeight)) {
+            return;
+          }
+          _this2[_itemHeights][i] = newHeight;
+
+          // Render the new positions.
+          if (!state.isRendering && !state.semaphore) {
+            _this2[_applyPositions](from, to, fastCache);
+          }
+        };
+
+        if (arity > 1) {
+          state.semaphore = !state.semaphore ? 0 : ++state.semaphore;
+        }
+
+        var row = getRow.apply(_this2, [config.reverse ? config.total - 1 - i : i, arity > 1 ? updateIndex : undefined]);
+
+        fastCache[i] = row;
         fragment[config.useFragment ? 'appendChild' : 'push'](row);
+      };
+
+      for (var i = from; i < to; i++) {
+        _loop(i);
       }
+
+      state.isRendering = false;
+
+      // Set the positions for the first (and hopefully last) time.
+      this[_applyPositions](from, to, fastCache);
 
       if (config.applyPatch) {
         return config.applyPatch(element, fragment);
@@ -270,6 +343,23 @@ var HyperList = function () {
 
       element.innerHTML = '';
       element.appendChild(fragment);
+    }
+  }, {
+    key: _applyPositions,
+    value: function value(from, to, fastCache) {
+      this[_calculatePositions](from);
+
+      var config = this[_config];
+      var reverse = config.reverse;
+      var itemPositions = this[_itemPositions];
+
+      for (var i = from; i < to; i++) {
+        var item = fastCache[i];
+        var offsetTop = itemPositions[i];
+        var top = reverse ? itemPositions.slice(-1) - offsetTop : offsetTop;
+
+        item.setAttribute('style', '\n        ' + (item.style.cssText || '') + '\n        position: absolute;\n        top: ' + top + 'px\n      ');
+      }
     }
   }]);
 
