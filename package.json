@@ -13,8 +13,8 @@
     "istanbul": "1.0.0-alpha.2",
     "mocha": "^2.4.5",
     "moment": "^2.13.0",
-    "react": "^15.1.0",
-    "react-dom": "^15.1.0",
+    "react": "^15.3.2",
+    "react-dom": "^15.3.2",
     "react-faux-dom": "^2.5.0",
     "stringdom": "jugglinmike/stringdom#f42ad65227fc4e5a1d120ae432c7ec4eaf6aa11b",
     "watchify": "^3.7.0"

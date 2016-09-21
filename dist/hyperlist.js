@@ -120,15 +120,17 @@ var HyperList = function () {
     value: function refresh(element, userProvidedConfig) {
       Object.assign(this[_config], defaultConfig, userProvidedConfig);
 
-      if (!element || element.nodeType !== 1) {
+      var config = this[_config];
+
+      if (!config.isReact && (!element || element.nodeType !== 1)) {
         throw new Error('HyperList requires a valid DOM Node container');
       }
 
-      this[_element] = element;
+      this[_element] = config.isReact ? {} : element;
 
-      var config = this[_config];
-
-      var scroller = this[_scroller] || config.scroller || document.createElement(config.scrollerTagName || 'tr');
+      var scroller = this[_scroller] || config.scroller || config.isReact ? {
+        key: 'scroller'
+      } : document.createElement(config.scrollerTagName || 'tr');
 
       // Default configuration option `useFragment` to `true`.
       if (typeof config.useFragment !== 'boolean') {
@@ -158,9 +160,21 @@ var HyperList = function () {
         }
       });
 
+      // If using React, the element object turns into a props object.
+      if (config.isReact) {
+        this[_element].style = {
+          width: '' + config.width,
+          height: '' + config.height,
+          overflow: 'auto',
+          position: 'relative',
+          padding: '0px'
+        };
+      }
       // Decorate the container element with inline styles that will match
       // the user supplied configuration.
-      element.setAttribute('style', '\n      width: ' + config.width + ';\n      height: ' + config.height + ';\n      overflow: auto;\n      position: relative;\n      padding: 0px;\n    ');
+      else if (!config.isReact) {
+          element.setAttribute('style', '\n        width: ' + config.width + ';\n        height: ' + config.height + ';\n        overflow: auto;\n        position: relative;\n        padding: 0px;\n      ');
+        }
 
       var scrollerHeight = config.itemHeight * config.total;
       var maxElementHeight = this[_maxElementHeight];
@@ -169,11 +183,20 @@ var HyperList = function () {
         console.warn(['HyperList: The maximum element height', maxElementHeight + 'px has', 'been exceeded; please reduce your item height.'].join(' '));
       }
 
-      scroller.setAttribute('style', '\n      opacity: 0;\n      position: absolute;\n      width: 1px;\n      height: ' + scrollerHeight + 'px;\n    ');
+      if (config.isReact) {
+        scroller.style = Object.assign({}, scroller.style, {
+          opacity: 0,
+          position: 'absolute',
+          width: '1px',
+          height: scrollerHeight + 'px'
+        });
+      } else {
+        scroller.setAttribute('style', '\n        opacity: 0;\n        position: absolute;\n        width: 1px;\n        height: ' + scrollerHeight + 'px;\n      ');
 
-      // Only append the scroller element once.
-      if (!this[_scroller]) {
-        element.appendChild(scroller);
+        // Only append the scroller element once.
+        if (!this[_scroller]) {
+          element.appendChild(scroller);
+        }
       }
 
       var height = userProvidedConfig.height;
@@ -203,15 +226,33 @@ var HyperList = function () {
       var item = config.generate(i);
       var itemHeight = config.itemHeight;
 
-      if (!item || item.nodeType !== 1) {
+      var offsetTop = i * itemHeight;
+      var top = reverse ? (total - 1) * itemHeight - offsetTop : offsetTop;
+
+      // Check for valid DOM nodes, unless using React.
+      if (!config.isReact && (!item || item.nodeType !== 1)) {
         throw new Error('Generator did not return a DOM Node for index: ' + i);
       }
+      // Is not a React element.
+      else if (config.isReact && !item) {
+          throw new Error('Generator did not return a React Element for index: ' + i);
+        }
+        // Is a React element.
+        else if (config.isReact) {
+            var _oldClass = item.props.className || '';
+
+            return React.cloneElement(item, {
+              key: i,
+              className: _oldClass + ' ' + (config.rowClassName || 'vrow'),
+              style: Object.assign({}, item.props.style, {
+                position: 'absolute',
+                top: top + 'px'
+              })
+            });
+          }
 
       var oldClass = item.getAttribute('class') || '';
       item.setAttribute('class', oldClass + ' ' + (config.rowClassName || 'vrow'));
-
-      var offsetTop = i * itemHeight;
-      var top = reverse ? (total - 1) * itemHeight - offsetTop : offsetTop;
 
       item.setAttribute('style', '\n      ' + (item.style.cssText || '') + '\n      position: absolute;\n      top: ' + top + 'px\n    ');
 
@@ -257,7 +298,9 @@ var HyperList = function () {
       this[_scroller] = scroller.cloneNode ? scroller.cloneNode() : scroller;
 
       // Keep the scroller in the list of children.
-      fragment[config.useFragment ? 'appendChild' : 'push'](this[_scroller]);
+      if (!config.isReact) {
+        fragment[config.useFragment ? 'appendChild' : 'push'](this[_scroller]);
+      }
 
       for (var i = from; i < to; i++) {
         var row = getRow(config.reverse ? config.total - 1 - i : i);
@@ -265,7 +308,7 @@ var HyperList = function () {
       }
 
       if (config.applyPatch) {
-        return config.applyPatch(element, fragment);
+        return config.applyPatch(element, fragment, scroller);
       }
 
       element.innerHTML = '';
