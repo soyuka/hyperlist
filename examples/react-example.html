@@ -60,116 +60,181 @@
   const main = document.querySelector('main');
 
   class HyperListReact extends React.Component {
-    render() {
-      return React.createElement('div', this.state.element,
-        this.state.fragment
-      );
-    }
-
     constructor(props) {
       super(props);
 
-      this.handleRef = this.handleRef.bind(this);
-
       this.state = {
         element: {
-          ref: this.handleRef
+          ref: this.handleRef.bind(this)
         },
         scroller: {
           key: 'scroller',
           style: {
-            position: 'relative'
+            position: 'absolute',
+            opacity: 0,
+            width: '1px',
+            height: '0px'
           }
         },
         fragment: [],
-        node: {}
+        node: {},
+        total: this.props.total,
+        reverse: this.props.reverse,
+        generate: this.props.generate,
+        height: window.innerHeight,
+        itemHeight: 50
       };
+
+      this.scroller = React.createElement('div', this.state.scroller)
+      this.state.fragment.push(this.scroller)
+
+      this._config = {
+        //@TODO use props one if provided?
+        transformElement: this.transformElement,
+        mergeStyle: this.mergeStyle.bind(this),
+        applyPatch: this.applyPatch.bind(this),
+        overrideScrollPosition: this.overrideScrollPosition.bind(this),
+        scroller: this.scroller,
+        useFragment: false,
+        inspectElement: (element, key) => element.props[key === 'class' ? 'className' : key] || null,
+      }
     }
 
     handleRef(node) {
       this.setState({ node })
     }
 
-    componentDidMount() {
+    transformElement(element, values) {
+      if (values.class) {
+        values.className = values.class
+        delete values.class
+      }
+
+      return React.cloneElement(element, values)
+    }
+
+    mergeStyle(element, style, forceClone) {
+      if (forceClone) {
+        return React.cloneElement(element, { style })
+      }
+
+      for (let i in style) {
+        if (element.props.style[i] !== style[i]) {
+          element.props.style[i] = style[i]
+        }
+      }
+
+      return element
+    }
+
+    applyPatch(element, fragment) {
+      this.setState({
+        element: Object.assign({}, this.state.element, {
+          style: Object.assign({}, this.state.element.style, element.props.style)
+        }),
+        fragment
+      });
+    }
+
+    refresh() {
+      this.list.refresh(this, this.config);
+    }
+
+    overrideScrollPosition() {
+     return this.state.node.scrollTop || 0
+    }
+
+    get config() {
       const {
         height = window.innerHeight,
         itemHeight = 50,
         total = 0,
         reverse = false,
         generate = () => {}
-      } = this.props;
+      } = this.state;
 
-      const config = {
+      return Object.assign({
         height,
         itemHeight,
         total,
         generate,
-        scroller: React.createElement('div', this.state.scroller),
-        useFragment: false,
-        overrideScrollPosition: () => this.state.node.scrollTop || 0,
-        inspectElement: (element, key) => element.props[key === 'class' ? 'className' : key] || null,
-        transformElement: (element, values) => {
-          if (values.class) {
-            values.className = values.class
-            delete values.class
-          }
+        reverse,
+      }, this._config);
+    }
 
-          return React.cloneElement(element, values)
-        },
-        mergeStyle: (element, style, forceClone) => {
-          if (forceClone) {
-            return React.cloneElement(element, { style })
-          }
-
-          for (let i in style) {
-            if (element.props.style[i] !== style[i]) {
-              element.props.style[i] = style[i]
-            }
-          }
-
-          return element
-        },
-        applyPatch: (element, fragment) => {
-          this.setState({
-            element: Object.assign({}, this.state.element, {
-              style: Object.assign({}, this.state.element.style, element.props.style)
-            }),
-            fragment
-          });
-        },
-      };
-
-      this.list = HyperList.create(this, config);
+    componentDidMount() {
+      this.list = HyperList.create(this, this.config);
 
       // Bind to the resize event, and since you should only ever have one
       // handler bound to this, we pave over whatever you had set before.
-      window.onresize = e => {
-        config.height = window.innerHeight;
-        this.list.refresh(this, config);
-      };
+      window.onresize = () => this.refresh();
     }
 
     componentWillUnmount() {
       window.onresize = null;
       this.list.destroy();
     }
-  }
 
-  HyperListReact.defaultProps = {
-    style: {}
+    componentWillReceiveProps({height, itemHeight, total, reverse, generate}) {
+      const options = {height, itemHeight, total, reverse, generate}
+      const props = {}
+
+      for (let i in this.props) {
+        if (options[i] !== undefined && this.props[i] !== options[i]) {
+          props[i] = options[i]
+        }
+      }
+
+      this.setState(props)
+      this.refresh()
+    }
+
+    render() {
+      return React.createElement('div', this.state.element,
+        this.state.fragment
+      );
+    }
   }
 
   class MyComponent extends React.Component {
+    constructor(props) {
+      super(props);
+
+      this.state = {
+        data: [0],
+        total: 0,
+        itemHeight: 30,
+        reverse: true
+      };
+    }
+
+    componentDidMount() {
+      this.interval = setInterval(e => {
+        const total = this.state.total + 1
+        this.setState({data: [total - 1].concat(this.state.data), total: total})
+        if (this.state.total == 10) {
+          clearInterval(this.interval)
+          return
+        }
+      }, 1000)
+    }
+
+    componentWillUnmount() {
+      clearInterval(this.interval)
+    }
+
     render() {
       return React.createElement(HyperListReact, {
-        itemHeight: 30,
-        total: 100000,
-        generate: this.generate
+        itemHeight: this.state.itemHeight,
+        total: this.state.total,
+        generate: this.generate.bind(this),
+        reverse: true,
+        style: {}
       })
     }
 
     generate(row) {
-      return React.createElement('div', {}, 'Item ' + row);
+      return React.createElement('div', {}, 'Item ' + this.state.data[row]);
     }
   }
 

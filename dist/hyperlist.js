@@ -53,7 +53,11 @@ var HyperList = function () {
     key: 'transformElement',
     value: function transformElement(element, values) {
       for (var i in values) {
-        element.setAttribute(i, values[i]);
+        if (i === 'class') {
+          addClass(element, values[i]);
+        } else {
+          element.setAttribute(i, values[i]);
+        }
       }
 
       return element;
@@ -156,7 +160,8 @@ var HyperList = function () {
         return;
       }
 
-      if (!lastRepaint || Math.abs(scrollTop - lastRepaint) > _this._averageHeight) {
+      var diff = lastRepaint ? scrollTop - lastRepaint : 0;
+      if (!lastRepaint || diff < 0 || diff > _this._averageHeight) {
         var rendered = _this._renderChunk();
 
         _this._lastRepaint = scrollTop;
@@ -266,11 +271,11 @@ var HyperList = function () {
       config.mergeStyle(element, elementStyle);
 
       if (scrollContainer) {
-        HyperList.mergeStyle(config.scrollContainer, { overflow: 'auto' });
+        config.mergeStyle(config.scrollContainer, { overflow: 'auto' });
       }
 
       var scrollerStyle = (_scrollerStyle = {
-        opacity: '0',
+        opacity: 0,
         position: 'absolute'
       }, _defineProperty(_scrollerStyle, isHoriz ? 'height' : 'width', '1px'), _defineProperty(_scrollerStyle, isHoriz ? 'width' : 'height', scrollerHeight + 'px'), _scrollerStyle);
 
@@ -286,7 +291,7 @@ var HyperList = function () {
       this._scrollHeight = this._computeScrollHeight();
 
       // Reuse the item positions if refreshed, otherwise set to empty array.
-      this._itemPositions = this._itemPositions || Array(config.total).fill(0);
+      this._itemPositions = this._itemPositions || Array(config.total === 0 ? 1 : config.total).fill(0);
 
       // Each index in the array should represent the position in the DOM.
       this._computePositions(0);
@@ -322,6 +327,7 @@ var HyperList = function () {
         throw new Error('Generator did not return a DOM Node for index: ' + i);
       }
 
+      // @TODO How to use `addClass` instead, note issue with react elements
       var oldClass = config.inspectElement(item, 'class') || '';
       item = config.transformElement(item, {
         key: i,
